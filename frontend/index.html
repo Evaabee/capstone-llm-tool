@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>LLM Majority Voting Prioritizer</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        margin: 40px;
+        max-width: 1000px;
+      }
+      h1 {
+        margin-bottom: 0.2rem;
+      }
+      p {
+        margin-top: 0.2rem;
+        color: #555;
+      }
+      #controls {
+        margin: 1rem 0;
+        padding: 1rem;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+      }
+      #results {
+        margin-top: 1rem;
+      }
+      .table-container {
+        max-height: 80vh;
+        overflow-y: auto;
+        overflow-x: auto;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.9rem;
+        margin: 0;
+      }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 6px 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background-color: #f5f5f5;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      #status {
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+        color: #444;
+      }
+      .final-label {
+        font-weight: 600;
+      }
+      .judge-column {
+        background-color: #e3f2fd !important;
+        border: 2px solid #2196f3 !important;
+        font-weight: 600;
+      }
+      .judge-header {
+        background-color: #2196f3 !important;
+        color: white !important;
+        position: relative;
+      }
+      .judge-badge {
+        display: inline-block;
+        background-color: #ff9800;
+        color: white;
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 4px;
+        font-weight: bold;
+      }
+      .meta-voting-note {
+        margin-top: 0.5rem;
+        padding: 0.5rem;
+        background-color: #fff3cd;
+        border: 1px solid #ffc107;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        color: #856404;
+      }
+      .voting-options {
+        margin: 1rem 0;
+        padding: 1rem;
+        background-color: #f9f9f9;
+        border-radius: 8px;
+      }
+      .voting-options label {
+        display: block;
+        margin: 0.5rem 0;
+        font-weight: 500;
+      }
+      .voting-options input[type="radio"] {
+        margin-right: 0.5rem;
+      }
+      .weight-inputs {
+        margin-top: 1rem;
+        padding: 1rem;
+        background-color: #fff;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        display: none;
+      }
+      .weight-inputs.active {
+        display: block;
+      }
+      .weight-inputs label {
+        display: inline-block;
+        width: 120px;
+        margin-right: 0.5rem;
+      }
+      .weight-inputs input[type="number"] {
+        width: 80px;
+        padding: 4px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      .weight-info {
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 0.5rem;
+      }
+      .judge-selector {
+        margin-top: 1rem;
+        padding: 1rem;
+        background-color: #fff;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        display: none;
+      }
+      .judge-selector.active {
+        display: block;
+      }
+      .judge-selector label {
+        display: inline-block;
+        width: 150px;
+        margin-right: 0.5rem;
+      }
+      .judge-selector select {
+        padding: 4px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        width: 150px;
+      }
+      .judge-info {
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>LLM-Based Requirement Prioritization</h1>
+    <p>
+      Upload a CSV/xlsx/xls file with columns: <code>issue_id</code>,
+      <code>title</code>, <code>description</code>. The tool will call 3 LLMs
+      (GPT, Claude, Gemini), then apply voting (majority, weighted, or
+      meta-voting) over P1/P2/P3.
+    </p>
+
+    <div id="controls">
+      <input type="file" id="file-input" accept=".csv,.xlsx,.xls" />
+
+      <div class="voting-options">
+        <label>Voting Method:</label>
+        <label>
+          <input type="radio" name="voting-method" value="majority" checked />
+          Majority Voting
+        </label>
+        <label>
+          <input type="radio" name="voting-method" value="weighted" />
+          Weighted Voting
+        </label>
+        <label>
+          <input type="radio" name="voting-method" value="meta" />
+          Meta-Voting (Model-of-Models)
+        </label>
+
+        <div id="weight-inputs" class="weight-inputs">
+          <label>GPT Weight:</label>
+          <input
+            type="number"
+            id="weight-gpt"
+            min="0"
+            step="0.1"
+            value="0.33"
+          />
+          <br />
+          <label>Claude Weight:</label>
+          <input
+            type="number"
+            id="weight-claude"
+            min="0"
+            step="0.1"
+            value="0.33"
+          />
+          <br />
+          <label>Gemini Weight:</label>
+          <input
+            type="number"
+            id="weight-gemini"
+            min="0"
+            step="0.1"
+            value="0.34"
+          />
+          <div class="weight-info">
+            Weights will be automatically normalized to sum to 1.0
+          </div>
+        </div>
+
+        <div id="judge-selector" class="judge-selector">
+          <label>Select Judge LLM:</label>
+          <select id="judge-model">
+            <option value="gpt">GPT</option>
+            <option value="claude">Claude</option>
+            <option value="gemini">Gemini</option>
+          </select>
+          <div class="judge-info">
+            The selected LLM will review the other two models' assessments and
+            determine the final priority.
+          </div>
+        </div>
+      </div>
+
+      <button id="run-btn">Run Prioritization</button>
+      <div id="status"></div>
+    </div>
+
+    <h2>Results</h2>
+    <div id="results"></div>
+
+    <script>
+      // Helper function to escape HTML
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      const runBtn = document.getElementById("run-btn");
+      const fileInput = document.getElementById("file-input");
+      const statusDiv = document.getElementById("status");
+      const resultsDiv = document.getElementById("results");
+      const weightInputs = document.getElementById("weight-inputs");
+      const judgeSelector = document.getElementById("judge-selector");
+      const votingMethodRadios = document.querySelectorAll(
+        'input[name="voting-method"]'
+      );
+
+      // Show/hide inputs based on voting method selection
+      votingMethodRadios.forEach((radio) => {
+        radio.addEventListener("change", () => {
+          if (radio.value === "weighted") {
+            weightInputs.classList.add("active");
+            judgeSelector.classList.remove("active");
+          } else if (radio.value === "meta") {
+            judgeSelector.classList.add("active");
+            weightInputs.classList.remove("active");
+          } else {
+            weightInputs.classList.remove("active");
+            judgeSelector.classList.remove("active");
+          }
+        });
+      });
+
+      runBtn.addEventListener("click", async () => {
+        const file = fileInput.files[0];
+        if (!file) {
+          alert("Please select a CSV file first.");
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        // Get selected voting method
+        const selectedMethod = document.querySelector(
+          'input[name="voting-method"]:checked'
+        ).value;
+        formData.append("voting_method", selectedMethod);
+
+        // Add weights if weighted voting is selected
+        if (selectedMethod === "weighted") {
+          const weightGpt =
+            parseFloat(document.getElementById("weight-gpt").value) || 0;
+          const weightClaude =
+            parseFloat(document.getElementById("weight-claude").value) || 0;
+          const weightGemini =
+            parseFloat(document.getElementById("weight-gemini").value) || 0;
+
+          if (weightGpt < 0 || weightClaude < 0 || weightGemini < 0) {
+            alert("Weights must be non-negative numbers.");
+            return;
+          }
+
+          if (weightGpt === 0 && weightClaude === 0 && weightGemini === 0) {
+            alert("At least one weight must be greater than 0.");
+            return;
+          }
+
+          formData.append("weight_gpt", weightGpt.toString());
+          formData.append("weight_claude", weightClaude.toString());
+          formData.append("weight_gemini", weightGemini.toString());
+        } else if (selectedMethod === "meta") {
+          const judgeModel = document.getElementById("judge-model").value;
+          formData.append("judge_model", judgeModel);
+        }
+
+        // Store judge model for table rendering (needed later for display)
+        let judgeModel = null;
+        if (selectedMethod === "meta") {
+          judgeModel = document.getElementById("judge-model").value;
+        }
+
+        const methodNames = {
+          majority: "majority",
+          weighted: "weighted",
+          meta: "meta-voting",
+        };
+        statusDiv.textContent = `Running LLMs and ${methodNames[selectedMethod]}...`;
+        resultsDiv.innerHTML = "";
+
+        try {
+          const response = await fetch("/api/label", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            statusDiv.textContent =
+              "Error: " + (err.error || response.statusText);
+            return;
+          }
+
+          const data = await response.json();
+          const results = data.results || [];
+
+          console.log("Received results:", results.length);
+          console.log("First result:", results[0]);
+          console.log("Last result:", results[results.length - 1]);
+
+          statusDiv.textContent = `Completed. Labeled ${results.length} requirements.`;
+
+          // Build HTML table
+          let html = '<div class="table-container">';
+
+          // Add note for meta-voting
+          if (selectedMethod === "meta" && judgeModel) {
+            const judgeName =
+              judgeModel.charAt(0).toUpperCase() + judgeModel.slice(1);
+            html += `<div class="meta-voting-note">`;
+            html += `<strong>Meta-Voting Active:</strong> ${judgeName} is acting as the judge, reviewing the assessments from the other two models.`;
+            html += `</div>`;
+          }
+
+          html += "<table>";
+          html += "<tr>";
+          html += "<th>Issue ID</th>";
+          html += "<th>Title</th>";
+
+          // Highlight judge column header
+          if (selectedMethod === "meta" && judgeModel === "gpt") {
+            html += `<th class="judge-header">GPT Label <span class="judge-badge">JUDGE</span></th>`;
+            html += "<th>Claude Label</th>";
+            html += "<th>Gemini Label</th>";
+          } else if (selectedMethod === "meta" && judgeModel === "claude") {
+            html += "<th>GPT Label</th>";
+            html += `<th class="judge-header">Claude Label <span class="judge-badge">JUDGE</span></th>`;
+            html += "<th>Gemini Label</th>";
+          } else if (selectedMethod === "meta" && judgeModel === "gemini") {
+            html += "<th>GPT Label</th>";
+            html += "<th>Claude Label</th>";
+            html += `<th class="judge-header">Gemini Label <span class="judge-badge">JUDGE</span></th>`;
+          } else {
+            html += "<th>GPT Label</th>";
+            html += "<th>Claude Label</th>";
+            html += "<th>Gemini Label</th>";
+          }
+
+          // Update final label header for meta-voting
+          if (selectedMethod === "meta" && judgeModel) {
+            const judgeName =
+              judgeModel.charAt(0).toUpperCase() + judgeModel.slice(1);
+            html += `<th>Final Label <span class="judge-badge">${judgeName} Decision</span></th>`;
+          } else {
+            html += "<th>Final Label</th>";
+          }
+          html += "</tr>";
+
+          for (const row of results) {
+            html += "<tr>";
+            html += `<td>${escapeHtml(String(row.issue_id || ""))}</td>`;
+            html += `<td>${escapeHtml(String(row.title || ""))}</td>`;
+
+            // For meta-voting: show other models' labels, but blank out judge's own label
+            if (selectedMethod === "meta" && judgeModel === "gpt") {
+              // GPT is judge - show its column header but blank cells
+              html += `<td class="judge-column">—</td>`;
+              html += `<td>${escapeHtml(String(row.label_claude || ""))}</td>`;
+              html += `<td>${escapeHtml(String(row.label_gemini || ""))}</td>`;
+            } else if (selectedMethod === "meta" && judgeModel === "claude") {
+              // Claude is judge - show its column header but blank cells
+              html += `<td>${escapeHtml(String(row.label_gpt || ""))}</td>`;
+              html += `<td class="judge-column">—</td>`;
+              html += `<td>${escapeHtml(String(row.label_gemini || ""))}</td>`;
+            } else if (selectedMethod === "meta" && judgeModel === "gemini") {
+              // Gemini is judge - show its column header but blank cells
+              html += `<td>${escapeHtml(String(row.label_gpt || ""))}</td>`;
+              html += `<td>${escapeHtml(String(row.label_claude || ""))}</td>`;
+              html += `<td class="judge-column">—</td>`;
+            } else {
+              // Normal voting - show all labels
+              html += `<td>${escapeHtml(String(row.label_gpt || ""))}</td>`;
+              html += `<td>${escapeHtml(String(row.label_claude || ""))}</td>`;
+              html += `<td>${escapeHtml(String(row.label_gemini || ""))}</td>`;
+            }
+
+            html += `<td class="final-label">${escapeHtml(
+              String(row.final_label || "")
+            )}</td>`;
+            html += "</tr>";
+          }
+
+          html += "</table>";
+          html += "</div>";
+          resultsDiv.innerHTML = html;
+
+          // Log to console for debugging
+          console.log(`Rendered ${results.length} rows in table`);
+        } catch (e) {
+          console.error(e);
+          statusDiv.textContent = "Unexpected error. See console.";
+        }
+      });
+    </script>
+  </body>
+</html>
