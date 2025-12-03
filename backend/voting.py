@@ -106,7 +106,8 @@ def meta_vote(
     gpt_label: str,
     claude_label: str,
     gemini_label: str,
-    judge_model: str
+    judge_model: str,
+    repo_context: Optional[str] = None
 ) -> str:
     """
     Use one LLM as a judge to adjudicate between the other two models' labels.
@@ -117,6 +118,7 @@ def meta_vote(
         claude_label: Label from Claude
         gemini_label: Label from Gemini
         judge_model: Which model to use as judge ("gpt", "claude", or "gemini")
+        repo_context: Optional repository context to provide to the judge LLM
     
     Returns:
         Final priority label (P1, P2, or P3)
@@ -132,7 +134,8 @@ def meta_vote(
             model1_label=claude_label,
             model2_name="Gemini",
             model2_label=gemini_label,
-            judge_model="gpt"
+            judge_model="gpt",
+            repo_context=repo_context
         )
     elif judge_model.lower() == "claude":
         # Claude is judge, GPT and Gemini are being judged
@@ -142,7 +145,8 @@ def meta_vote(
             model1_label=gpt_label,
             model2_name="Gemini",
             model2_label=gemini_label,
-            judge_model="claude"
+            judge_model="claude",
+            repo_context=repo_context
         )
     elif judge_model.lower() == "gemini":
         # Gemini is judge, GPT and Claude are being judged
@@ -152,7 +156,8 @@ def meta_vote(
             model1_label=gpt_label,
             model2_name="Claude",
             model2_label=claude_label,
-            judge_model="gemini"
+            judge_model="gemini",
+            repo_context=repo_context
         )
     else:
         # Invalid judge model, fallback to majority vote

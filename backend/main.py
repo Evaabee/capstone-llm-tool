@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import List, Dict, Optional
 import pandas as pd
 from dotenv import load_dotenv
+import subprocess
+import tempfile
+import shutil
+import os
 
 # Load environment variables from .env file
 load_dotenv()
@@ -27,6 +31,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 INDEX_FILE = FRONTEND_DIR / "index.html"
 
+# Directory for temporary cloned repositories
+TEMP_REPO_DIR = PROJECT_ROOT / "temp_repos"
+TEMP_REPO_DIR.mkdir(exist_ok=True)
+
 
 @app.get("/")
 async def serve_index():
@@ -38,6 +46,95 @@ async def serve_index():
 
 from io import BytesIO, StringIO
 
+def clone_and_extract_repo_context(repo_url: str) -> Optional[str]:
+    """
+    Clone a git repository and extract relevant context files.
+    Returns a string containing relevant code and documentation context.
+    """
+    if not repo_url:
+        return None
+    
+    # Create a temporary directory for this clone
+    temp_dir = tempfile.mkdtemp(dir=TEMP_REPO_DIR)
+    
+    try:
+        # Clone the repository
+        print(f"Cloning repository: {repo_url}")
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", repo_url, temp_dir],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode != 0:
+            print(f"Error cloning repository: {result.stderr}")
+            return None
+        
+        # Extract relevant files
+        context_parts = []
+        
+        # Read README files
+        readme_files = list(Path(temp_dir).rglob("README*"))
+        for readme in readme_files[:3]:  # Limit to first 3 README files
+            try:
+                content = readme.read_text(encoding='utf-8', errors='ignore')
+                if len(content) > 5000:  # Truncate very long READMEs
+                    content = content[:5000] + "..."
+                context_parts.append(f"=== {readme.relative_to(temp_dir)} ===\n{content}\n")
+            except Exception as e:
+                print(f"Error reading {readme}: {e}")
+        
+        # Read code files (limit to common file types and reasonable size)
+        code_extensions = {'.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.go', '.rs', '.rb', '.php', '.tsx', '.jsx'}
+        code_files = []
+        for ext in code_extensions:
+            code_files.extend(Path(temp_dir).rglob(f"*{ext}"))
+        
+        # Filter out common directories to ignore
+        ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', 'env', 'dist', 'build', '.next'}
+        filtered_files = [
+            f for f in code_files 
+            if not any(ignore_dir in str(f) for ignore_dir in ignore_dirs)
+        ]
+        
+        # Limit to first 20 code files and max 1000 lines per file
+        for code_file in filtered_files[:20]:
+            try:
+                content = code_file.read_text(encoding='utf-8', errors='ignore')
+                lines = content.split('\n')
+                if len(lines) > 1000:
+                    content = '\n'.join(lines[:1000]) + "\n... (truncated)"
+                
+                # Only include if file is not too large
+                if len(content) < 50000:  # Skip files larger than 50KB
+                    context_parts.append(f"=== {code_file.relative_to(temp_dir)} ===\n{content}\n")
+            except Exception as e:
+                print(f"Error reading {code_file}: {e}")
+        
+        # Combine all context
+        context = "\n\n".join(context_parts)
+        
+        # Limit total context size (keep it reasonable for LLM)
+        if len(context) > 100000:  # ~100KB max
+            context = context[:100000] + "\n... (context truncated)"
+        
+        return context if context else None
+        
+    except subprocess.TimeoutExpired:
+        print(f"Timeout cloning repository: {repo_url}")
+        return None
+    except Exception as e:
+        print(f"Error processing repository: {e}")
+        return None
+    finally:
+        # Clean up temporary directory
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception as e:
+            print(f"Error cleaning up temp directory: {e}")
+
+
 @app.post("/api/label")
 async def label_requirements(
     file: UploadFile = File(...),
@@ -46,6 +143,7 @@ async def label_requirements(
     weight_claude: Optional[float] = Form(None),
     weight_gemini: Optional[float] = Form(None),
     judge_model: Optional[str] = Form(None),
+    repo_url: Optional[str] = Form(None),
 ):
     """
     Accept a CSV or XLSX/XLS file with columns: issue_id, title, description
@@ -133,11 +231,21 @@ async def label_requirements(
     # Convert to list of dicts for LLM calls
     requirements: List[Dict] = df.to_dict(orient="records")
 
-    # Call each model
+    # Extract repository context if URL is provided
+    repo_context = None
+    if repo_url:
+        print(f"Extracting context from repository: {repo_url}")
+        repo_context = clone_and_extract_repo_context(repo_url)
+        if repo_context:
+            print(f"Extracted {len(repo_context)} characters of repository context")
+        else:
+            print("Warning: Failed to extract repository context, proceeding without it")
+
+    # Call each model with repository context
     print(f"DEBUG MAIN: Calling LLMs for {len(requirements)} requirements")
-    gpt_labels = call_gpt(requirements)
-    claude_labels = call_claude(requirements)
-    gemini_labels = call_gemini(requirements)
+    gpt_labels = call_gpt(requirements, repo_context=repo_context)
+    claude_labels = call_claude(requirements, repo_context=repo_context)
+    gemini_labels = call_gemini(requirements, repo_context=repo_context)
     
     print(f"DEBUG MAIN: GPT labels returned: {gpt_labels}")
     print(f"DEBUG MAIN: Claude labels returned: {claude_labels}")
@@ -159,7 +267,7 @@ async def label_requirements(
         if voting_method == "weighted":
             final = weighted_vote([lg, lc, lge], weights)
         elif voting_method == "meta":
-            final = meta_vote(r, lg, lc, lge, judge_model)
+            final = meta_vote(r, lg, lc, lge, judge_model, repo_context=repo_context)
         else:
             final = majority_vote([lg, lc, lge])
 

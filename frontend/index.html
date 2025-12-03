@@ -169,7 +169,39 @@
     </p>
 
     <div id="controls">
-      <input type="file" id="file-input" accept=".csv,.xlsx,.xls" />
+      <div style="margin-bottom: 1rem">
+        <label
+          for="repo-url"
+          style="display: block; margin-bottom: 0.5rem; font-weight: 500"
+        >
+          Repository URL (optional):
+        </label>
+        <input
+          type="url"
+          id="repo-url"
+          placeholder="https://github.com/user/repo.git"
+          style="
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+          "
+        />
+        <div style="font-size: 0.85rem; color: #666; margin-top: 0.25rem">
+          Provide a Git repository URL to give the LLMs context about your
+          codebase when prioritizing requirements.
+        </div>
+      </div>
+      <div style="margin-bottom: 1rem">
+        <label
+          for="file-input"
+          style="display: block; margin-bottom: 0.5rem; font-weight: 500"
+        >
+          Requirements File:
+        </label>
+        <input type="file" id="file-input" accept=".csv,.xlsx,.xls" />
+      </div>
 
       <div class="voting-options">
         <label>Voting Method:</label>
@@ -282,6 +314,12 @@
 
         const formData = new FormData();
         formData.append("file", file);
+
+        // Get repo URL if provided
+        const repoUrl = document.getElementById("repo-url").value.trim();
+        if (repoUrl) {
+          formData.append("repo_url", repoUrl);
+        }
 
         // Get selected voting method
         const selectedMethod = document.querySelector(

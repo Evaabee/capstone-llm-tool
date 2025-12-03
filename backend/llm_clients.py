@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 import openai
 
 
@@ -8,6 +8,17 @@ Requirement = Dict[str, str]  # e.g., {"issue_id": "...", "title": "...", "descr
 
 # Optimized concise prompt to reduce token usage
 PRIORITIZATION_PROMPT = """Prioritize: {title}{description}
+
+P1=Critical, P2=Medium, P3=Low. Respond with only: P1, P2, or P3."""
+
+# Prompt with repository context
+PRIORITIZATION_PROMPT_WITH_CONTEXT = """You are prioritizing requirements for a software project. Below is relevant context from the codebase:
+
+{repo_context}
+
+---
+
+Now prioritize this requirement: {title}{description}
 
 P1=Critical, P2=Medium, P3=Low. Respond with only: P1, P2, or P3."""
 
@@ -21,7 +32,7 @@ def _truncate_text(text: str, max_length: int = 200) -> str:
     return truncated + "..." if len(text) > max_length else text
 
 
-def _build_prompt(requirement: Requirement) -> str:
+def _build_prompt(requirement: Requirement, repo_context: Optional[str] = None) -> str:
     """Build the prompt for a single requirement with optimized token usage."""
     title = requirement.get("title", "").strip()
     description = requirement.get("description", "").strip()
@@ -29,17 +40,26 @@ def _build_prompt(requirement: Requirement) -> str:
     # Truncate description to save tokens (keep title as-is, it's usually short)
     description = _truncate_text(description, max_length=150)
     
-    # Format: if description exists, add it, otherwise just title
-    if description:
-        return PRIORITIZATION_PROMPT.format(
+    # Use context-aware prompt if repository context is provided
+    if repo_context:
+        desc_text = f"\n{description}" if description else ""
+        return PRIORITIZATION_PROMPT_WITH_CONTEXT.format(
+            repo_context=repo_context,
             title=title,
-            description=f"\n{description}"
+            description=desc_text
         )
     else:
-        return PRIORITIZATION_PROMPT.format(
-            title=title,
-            description=""
-        )
+        # Format: if description exists, add it, otherwise just title
+        if description:
+            return PRIORITIZATION_PROMPT.format(
+                title=title,
+                description=f"\n{description}"
+            )
+        else:
+            return PRIORITIZATION_PROMPT.format(
+                title=title,
+                description=""
+            )
 
 
 def _get_openrouter_client():
@@ -55,7 +75,7 @@ def _get_openrouter_client():
     )
 
 
-def call_gpt(requirements: List[Requirement]) -> Dict[str, str]:
+def call_gpt(requirements: List[Requirement], repo_context: Optional[str] = None) -> Dict[str, str]:
     """
     Call GPT model to label each requirement.
     Return a dict: {issue_id: priority_label}
@@ -81,7 +101,7 @@ def call_gpt(requirements: List[Requirement]) -> Dict[str, str]:
             continue
 
         try:
-            prompt = _build_prompt(r)
+            prompt = _build_prompt(r, repo_context=repo_context)
             print(f"DEBUG GPT [{issue_id}]: Sending prompt: {prompt[:100]}...")
             
             response = client.chat.completions.create(
@@ -142,7 +162,7 @@ def call_gpt(requirements: List[Requirement]) -> Dict[str, str]:
     return labels
 
 
-def call_claude(requirements: List[Requirement]) -> Dict[str, str]:
+def call_claude(requirements: List[Requirement], repo_context: Optional[str] = None) -> Dict[str, str]:
     """
     Call Claude model to label each requirement.
     Return a dict: {issue_id: priority_label}
@@ -196,7 +216,7 @@ def call_claude(requirements: List[Requirement]) -> Dict[str, str]:
     return labels
 
 
-def call_gemini(requirements: List[Requirement]) -> Dict[str, str]:
+def call_gemini(requirements: List[Requirement], repo_context: Optional[str] = None) -> Dict[str, str]:
     """
     Call Gemini model to label each requirement.
     Return a dict: {issue_id: priority_label}
@@ -222,7 +242,7 @@ def call_gemini(requirements: List[Requirement]) -> Dict[str, str]:
             continue
 
         try:
-            prompt = _build_prompt(r)
+            prompt = _build_prompt(r, repo_context=repo_context)
             response = client.chat.completions.create(
                 model="google/gemini-2.5-pro",
                 messages=[
@@ -262,6 +282,18 @@ Req: {title}{description}
 
 P1=Critical, P2=Medium, P3=Low. Choose final label: P1, P2, or P3."""
 
+# Meta-voting prompt with repository context
+META_VOTING_PROMPT_WITH_CONTEXT = """You are reviewing requirement prioritization for a software project. Below is relevant context from the codebase:
+
+{repo_context}
+
+---
+
+Review this requirement: {title}{description}
+{model1_name}: {model1_label}, {model2_name}: {model2_label}
+
+P1=Critical, P2=Medium, P3=Low. Choose final label: P1, P2, or P3."""
+
 
 def call_judge_llm(
     requirement: Requirement,
@@ -269,7 +301,8 @@ def call_judge_llm(
     model1_label: str,
     model2_name: str,
     model2_label: str,
-    judge_model: str
+    judge_model: str,
+    repo_context: Optional[str] = None
 ) -> str:
     """
     Call a specific LLM as a judge to adjudicate between two other models' labels.
@@ -313,14 +346,26 @@ def call_judge_llm(
         description = _truncate_text(description, max_length=150)
         desc_text = f"\n{description}" if description else ""
         
-        prompt = META_VOTING_PROMPT.format(
-            title=title,
-            description=desc_text,
-            model1_name=model1_name,
-            model1_label=model1_label or "No label",
-            model2_name=model2_name,
-            model2_label=model2_label or "No label"
-        )
+        # Use context-aware prompt if repository context is provided
+        if repo_context:
+            prompt = META_VOTING_PROMPT_WITH_CONTEXT.format(
+                repo_context=repo_context,
+                title=title,
+                description=desc_text,
+                model1_name=model1_name,
+                model1_label=model1_label or "No label",
+                model2_name=model2_name,
+                model2_label=model2_label or "No label"
+            )
+        else:
+            prompt = META_VOTING_PROMPT.format(
+                title=title,
+                description=desc_text,
+                model1_name=model1_name,
+                model1_label=model1_label or "No label",
+                model2_name=model2_name,
+                model2_label=model2_label or "No label"
+            )
         
         response = client.chat.completions.create(
             model=model_id,

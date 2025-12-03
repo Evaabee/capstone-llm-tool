@@ -24,3 +24,6 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Temporary cloned repositories
+temp_repos/
+
